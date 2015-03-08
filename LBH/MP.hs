@@ -3,8 +3,7 @@
            , DeriveDataTypeable
            , MultiParamTypeClasses #-}
 -- | Defines the data model and security policy of posts.
-module LBH.MP ( personaLoginEmailToUid
-              , withLBHPolicy
+module LBH.MP ( withLBHPolicy
                 -- * Posts
               , PostId
               , getPostId
@@ -19,6 +18,7 @@ module LBH.MP ( personaLoginEmailToUid
 import           Prelude hiding (lookup)
 
 import           Data.Maybe
+import           Data.Monoid (mempty)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -42,8 +42,7 @@ import           Hails.HttpServer.Types
 
 import           LIO
 import           LIO.DCLabel
-import           LIO.DCLabel.Core
-import           LIO.DCLabel.Privs.TCB (allPrivTCB)
+import           LIO.Delegate
 
 --
 -- Policy
@@ -53,6 +52,9 @@ import           LIO.DCLabel.Privs.TCB (allPrivTCB)
 -- the privilege.
 data LBHPolicy = LBHPolicyTCB DCPriv
                   deriving Typeable
+
+anybody :: CNF
+anybody = toCNF True
 
 instance PolicyModule LBHPolicy where
    initPolicyModule priv =  do
@@ -95,12 +97,12 @@ instance PolicyModule LBHPolicy where
            secrecy   ==> this
            integrity ==> anybody
          document $ \doc -> do
-           let (Just u) = fromDocument doc
-               user = userToPrincipal . userEmail $ u
+           let (Just u) = fromDocument (doc :: Document)
+               user = userToPrincipal . userId $ u
            readers ==> anybody
            writers ==> this \/ user
          field "fullName" $ searchable
-         field "email"    $ searchable
+         --field "email"    $ searchable
        -- = Tags ====================================================
        collection "tags" $ do
          access $ do
@@ -116,7 +118,7 @@ instance PolicyModule LBHPolicy where
        --
      return $ LBHPolicyTCB priv
        where this = privDesc priv
-             userToPrincipal = principal . S8.pack . T.unpack
+             userToPrincipal = principal . T.unpack
 
 
 
@@ -183,7 +185,7 @@ instance DCRecord Post where
   recordCollection _ = "posts"
 
 instance DCLabeledRecord LBHPolicy Post where
-  endorseInstance _ = LBHPolicyTCB noPriv
+  endorseInstance _ = LBHPolicyTCB mempty
 
 
 -- | Execute action, restoring the current label.
@@ -196,13 +198,13 @@ toLabeledTCB privs lgoal act = do
   l0   <- getLabel
   res  <- act
   l1   <- getLabel
-  let lendorse = dcLabel dcTrue (toComponent (privDesc privs))
+  let lendorse = True %% privs
       lgoal' = lgoal `lub` lendorse
             -- effectively use privs in integrity only:
-      l1' = l1 `glb` dcLabel dcFalse (toComponent (privDesc privs))
+      l1' = l1 `glb` (False %% privs)
   unless (l1' `canFlowTo` lgoal') $ fail "Invalid usage of toLabeled"
   lres <- labelP privs lgoal' res
-  setLabelP privs (partDowngradeP privs l1 l0)
+  setLabelP privs (downgradeP privs l1 `lub` l0)
   return lres
    
 
@@ -223,13 +225,13 @@ labeledRequestToPost lreq = withPolicyModule $ \(LBHPolicyTCB p) ->
 partiallyFillPost :: DCLabeled Document -> DC (Maybe (DCLabeled Post))
 partiallyFillPost ldoc = withPolicyModule $ \(LBHPolicyTCB p) -> do
   -- Unlabel document
-  doc <- unlabel ldoc
+  doc <- liftLIO $ unlabel ldoc
   case lookupObjId "_id" doc of
     Nothing -> return Nothing
     Just (_id :: ObjectId) -> do
       -- Lookup existing document:
       mldoc' <- findOne (select ["_id" -: _id] "posts")
-      clr <- getClearance
+      clr <- liftLIO $ getClearance
       case mldoc' of
         Just ldoc' | canFlowTo (labelOf ldoc') clr -> do
           res <- liftLIO $ toLabeledTCB p (labelOf ldoc') $ do
@@ -247,16 +249,16 @@ partiallyFillPost ldoc = withPolicyModule $ \(LBHPolicyTCB p) -> do
 -- | Save post, by first declassifying it
 savePost :: DCLabeled Post -> DC ()
 savePost lpost =  withPolicyModule $ \(LBHPolicyTCB privs) -> do
-  lpost' <- untaintLabeledP privs l lpost
-  post <- unlabelP privs lpost
+  lpost' <- liftLIO $ taintLabeledP privs l lpost
+  post <- liftLIO $ unlabelP privs lpost
   (Just lpostE) <- findOne (select ["_id" -: postId post] "posts")
   -- Use privs if integrity stays the same, but we're making
   -- the post private
   let p = if l `canFlowTo` labelOf lpostE
-            then privs else noPriv
+            then privs else mempty
   saveLabeledRecordP p lpost'
   -- update tags
-  postE <- unlabel lpostE >>= fromDocument
+  postE <- liftLIO $ unlabel lpostE >>= fromDocument
   let tags = List.nub $ postTags post ++ postTags postE
       cnts = map (\t -> case () of
                          _ | t `elem`    postTags postE &&
@@ -270,28 +272,28 @@ savePost lpost =  withPolicyModule $ \(LBHPolicyTCB privs) -> do
       Nothing -> void $ insertRecordP p TagEntry { tagName = t, tagCount = 1 }
       Just t' -> saveRecordP p $ t' { tagCount = tagCount t' + c }
   --
-    where l = dcLabel dcTrue (dcIntegrity . labelOf $ lpost)
+    where l = True %% (dcIntegrity . labelOf $ lpost)
 
 -- | Delete post if endorsed by owner
 deletePost :: DCLabeled Request -> DC ()
 deletePost lreq = withPolicyModule $ \(LBHPolicyTCB privs) -> do
-  doc <- labeledRequestToHson lreq >>= unlabel
+  doc <- liftLIO $ labeledRequestToHson lreq >>= unlabel
   case (lookupObjId "_id" doc, lookup "_method" doc) of
     (Just _id, Just ("DELETE" :: Text)) -> do
      (Just lpost) <- findOne $ select ["_id" -: _id] "posts"
      -- Use privs if request is from the correct user (i.e.,
      -- has at least same integrity)
      let p = if l `canFlowTo` labelOf lpost
-               then privs else noPriv
+               then privs else mempty
      deleteP p (select ["_id" -: _id] "posts")
      -- update tags
-     post <- unlabelP p lpost >>= fromDocument
+     post <- liftLIO $ unlabelP p lpost >>= fromDocument
      forM_ (postTags post) $ \t -> do
        (Just t') <- findBy "tags" "_id" t
        saveRecordP p $ t' { tagCount = tagCount t' - 1 }
      --
     _ -> fail "deletePost: Missing _id"
-    where l = dcLabel dcTrue (dcIntegrity . labelOf $ lreq)
+    where l = True %% (dcIntegrity . labelOf $ lreq)
 
 --
 -- Users
@@ -300,41 +302,41 @@ deletePost lreq = withPolicyModule $ \(LBHPolicyTCB privs) -> do
 -- | Data type describing users
 data User = User { userId       :: UserName  -- ^ UserName
                  , userFullName :: Text      -- ^ User's full name
-                 , userEmail    :: UserName  -- ^ User's email
+                 --, userEmail    :: UserName  -- ^ User's email
                  } deriving (Show, Eq)
 
 instance DCRecord User where
   fromDocument doc = do
     uid      <- lookup "_id" doc
     fullName <- lookup "fullName" doc
-    email    <- lookup "email" doc
+    --email    <- lookup "email" doc
     return User { userId       = uid
-                , userFullName = fullName
-                , userEmail    = email }
+                , userFullName = fullName }
+                --, userEmail    = email }
                 
   toDocument u = [ "_id"      -: userId u
-                 , "fullName" -: userFullName u
-                 , "email"    -: userEmail u ]
+                 , "fullName" -: userFullName u ]
+                 --, "email"    -: userEmail u ]
 
   recordCollection _ = "users"
 
 instance DCLabeledRecord LBHPolicy User where
-  endorseInstance _ = LBHPolicyTCB noPriv
+  endorseInstance _ = LBHPolicyTCB mempty
 
 
 -- | Inser new user. Nothing = success, String = error
 createUser :: DCLabeled User -> DC (Maybe String)
 createUser luser = withPolicyModule $ \(LBHPolicyTCB _privs) -> do
-  let (Just privs) = dcDelegatePriv _privs (privDesc _privs \/ principal "#users")
-  user  <- unlabel luser
+  let privs = delegate _privs (privDesc _privs \/ principal "#users")
+  user  <- liftLIO $ unlabel luser
   let wellFormed = let uid = T.unpack $ userId user
                    in length uid <= 16 &&
                       uid =~ ("^[a-zA-Z][a-zA-Z0-9_]+$" :: String)
   if not wellFormed
     then return . Just $ "Malformed username"
     else do ps0 <- findAll (select ["_id"   -: userId user] "users")
-            ps1 <- findAll (select ["email" -: userEmail user] "users")
-            if null (ps0 ++ ps1 :: [User])
+            --ps1 <- findAll (select ["email" -: userEmail user] "users")
+            if null (ps0 {- ++ ps1 -} :: [User])
               then do void $ insertLabeledRecordP privs luser
                       return Nothing
               else return . Just $ "Username exists"
@@ -347,8 +349,7 @@ updateUser ldoc = withPolicyModule $ \(LBHPolicyTCB _privs) -> do
   case mluser of
     Nothing -> return Nothing
     Just luser -> do
-      let (Just privs) = dcDelegatePriv _privs
-                                        (privDesc _privs \/ principal "#users")
+      let privs = delegate _privs (privDesc _privs \/ principal "#users")
       saveLabeledRecordP privs luser
       return (Just luser)
 
@@ -357,13 +358,13 @@ partiallyFillUser :: DCPriv
                   -> DCLabeled Document -> DBAction (Maybe (DCLabeled User))
 partiallyFillUser p ldoc = do
   -- Unlabel document
-  doc <- unlabel ldoc
+  doc <- liftLIO $ unlabel ldoc
   case lookup "_id" doc of
     Nothing -> return Nothing
     Just (_id :: UserName) -> do
       -- Lookup existing document:
       mldoc' <- findOne (select ["_id" -: _id] "users")
-      clr <- getClearance
+      clr <- liftLIO $ getClearance
       case mldoc' of
         Just ldoc' | canFlowTo (labelOf ldoc') clr -> do
           res <- liftLIO $ toLabeledTCB p (labelOf ldoc') $ do
@@ -423,48 +424,3 @@ lookupTyped n d = case lookup n d of
           Just i -> return i
           _ -> fail $ "lookupTyped: cannot extract id from " ++ show n
   where maybeRead = fmap fst . listToMaybe . reads
-
--- | Requests are labeled by email addreses, relabel to id's.
-personaLoginEmailToUid :: Middleware
-personaLoginEmailToUid app conf lreq = do
-  meu <- liftLIO . withPolicyModule $ \(LBHPolicyTCB privs) -> do
-    let i     = dcIntegrity $ requestLabel conf
-        s     = dcSecrecy   $ requestLabel conf
-        ps    = toList i
-        email = head . head $ ps
-    -- Label must have format <_, principal>
-    musr <- if i == dcFalse || length ps /= 1 || length (head ps) /= 1
-              then return Nothing
-              else do mu <- findByP privs "users" "email" $
-                              T.decodeUtf8 . principalName $ email
-                      return $ (principal . T.encodeUtf8 . userId) `liftM` mu
-    return $ do { u <- musr ; return $ mkXfms email u }
-  case meu of
-    Nothing -> app conf lreq
-    Just (e2u, u2e) -> do
-         let conf' = conf { browserLabel = dcLabel
-                              (e2u $ dcSecrecy $ browserLabel conf) dcTrue
-                          , requestLabel = dcLabel
-                               dcTrue (e2u $ dcIntegrity $ requestLabel conf)
-                          }
-         setClearanceP allPrivTCB $ browserLabel conf'
-         lreq' <- relabelLabeledP allPrivTCB (requestLabel conf') lreq
-         resp <- app conf' lreq'
-         curl <- getLabel
-         curc <- getClearance
-         let curc' = dcLabel (u2e $ dcSecrecy curc) (u2e $ dcIntegrity curc)
-             curl' = dcLabel (u2e $ dcSecrecy curl) (u2e $ dcIntegrity curl)
-         -- raise current clearance, considering the current label
-         setClearanceP allPrivTCB $ curc' `upperBound` curl
-         -- change current label
-         setLabelP allPrivTCB curl'
-         -- lower current clearance
-         setClearanceP allPrivTCB $ curc'
-         return resp
-    where mkXfms e u = ( \cmp -> xfm (\x -> if x == e then u else x) cmp
-                       , \cmp -> xfm (\x -> if x == u then e else x) cmp )
-          xfm f cmp | cmp == dcTrue || cmp == dcFalse = cmp
-          xfm f cmp = let cs = unDCFormula cmp
-                      in dcFormula $
-                           Set.map (\c -> Clause $ Set.map f $ unClause c) cs
-

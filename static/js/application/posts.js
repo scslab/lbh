@@ -115,8 +115,9 @@ $(document).ready(function() {
     });
 
     $("#post-save-btn").click( function () {
+      var postId = $("#editPost").find("input[name=_id]").val();
       set_tags("#editPost");
-      $.ajax({ url  : '/posts'
+      $.ajax({ url  : '/posts/' + postId
         , type : 'PUT'
         , data : $("#editPost").serialize()}
         ).done(function() {
@@ -130,9 +131,10 @@ $(document).ready(function() {
     });
 
     $("#post-delete-btn").click( function () {
-      $.ajax({ url  : '/posts'
+      var postId = $("#editPost").find("input[name=_id]").val();
+      $.ajax({ url  : '/posts/' + postId
         , type : 'DELETE'
-        , data : "_id="+$("#editPost").find("input[name=_id]").val()
+        , data : "_id=" + postId
         +"&_method=DELETE"
       }).always(function() {
         window.location="/posts";
@@ -141,8 +143,9 @@ $(document).ready(function() {
 
 
     $("#post-make-public-btn").click( function () {
+      var postId = $("#editPost").find("input[name=_id]").val();
       set_tags("#editPost");
-      $.ajax({ url  : '/posts'
+      $.ajax({ url  : '/posts/' + postId
         , type : 'PUT'
         , data : $("#editPost").serialize()+"&isPublic=True"}
         ).done(function() {

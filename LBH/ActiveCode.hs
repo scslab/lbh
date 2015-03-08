@@ -8,7 +8,6 @@ module LBH.ActiveCode ( Code(..)
 
 import           Prelude hiding (id)
 
-import qualified Data.ByteString.Lazy.Char8 as L8
 import           Data.Aeson hiding (Result)
 import           Data.List (stripPrefix, concat, intercalate)
 import           Data.Maybe
@@ -21,7 +20,8 @@ import           Control.Monad.State
 
 import           LIO
 import           LIO.DCLabel
-import           LIO.CJail
+import           LIO.TCB (ioTCB)
+import           System.Process (readProcessWithExitCode)
 import           System.Exit
 
 import           Text.Pandoc hiding (Code)
@@ -36,7 +36,7 @@ import           Text.Blaze.Html5.Attributes (id, name, class_)
 -- | Code from clients
 data Code = Code { codeId       :: String
                  , codeLanguage :: String
-                 , codeSource   :: L8.ByteString
+                 , codeSource   :: String
                  } deriving (Eq, Show)
 
 instance FromJSON Code where
@@ -47,7 +47,7 @@ instance FromJSON Code where
 -- | Result types, currently no interactive 
 data Result = Result { resultId    :: String
                      , resultCode  :: Int
-                     , resultValue :: L8.ByteString
+                     , resultValue :: String
                      } deriving (Eq, Show)
 
 instance ToJSON Result where
@@ -57,14 +57,14 @@ instance ToJSON Result where
 
 execCode :: Code -> DC Result
 execCode c = do
-  (code,out,_) <- inCJail $
+  (code,out,_) <- ioTCB $ -- XXX for demo -- inCJail $
      readProcessWithExitCode "activeCode" [lang] (source)
   let rc = if code == ExitSuccess then 0 else -1
   return $ Result { resultId    = codeId c
                   , resultCode  = rc
-                  , resultValue = L8.pack $ out }
+                  , resultValue = out }
      where lang   = head . lines $ codeLanguage c
-           source = L8.unpack $ codeSource c
+           source = codeSource c
 
 --
 --

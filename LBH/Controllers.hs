@@ -36,7 +36,7 @@ import           Data.Aeson (decode, encode, toJSON)
 server :: Application
 server = mkRouter $ do
   Frank.post "/users" usersCreate
-  routeAll . personaLoginEmailToUid . mkRouter $ do
+  routeAll . mkRouter $ do
     routeTop welcomeController
     routeName "users" usersController
     routeName "posts" postsController
@@ -61,8 +61,7 @@ postsController = do
     ups <- liftLIO $ forM ps $ \p-> do
       u <- withLBHPolicy $ findBy  "users" "_id" (postOwner p)
       return (fromMaybe (User { userId = postOwner p
-                              , userFullName = T.empty
-                              , userEmail = T.empty }) u, p)
+                              , userFullName = T.empty }) u, p)
     return $ respondHtml mu $ indexPosts "All posts" mu ups
   REST.new $ withAuthUser $ \u ->
     return $ respondHtml (Just u) (newPost u)
@@ -72,7 +71,7 @@ postsController = do
       lpost <- liftLIO $ labeledRequestToPost lreq
       _id <- insertLabeledRecord lpost
       -- insert tags
-      post <- unlabel lpost
+      post <- liftLIO $ unlabel lpost
       forM_ (postTags post) $ \t -> do
         md <- findBy "tags" "_id" t
         case md of
@@ -100,7 +99,7 @@ postsController = do
       Nothing -> return serverError
       Just lpost -> do
         liftLIO $ savePost lpost
-        post <- unlabel lpost
+        post <- liftLIO $ unlabel lpost
         return $ redirectTo $ "/posts/" ++ show (getPostId post)
   REST.delete $ withAuthUser $ \usr -> do
     lreq <- request
@@ -134,7 +133,7 @@ usersController = do
     musr <- currentUser
     case musr of
       Just usr -> return $ redirectTo $ "/users/" ++ T.unpack (userId usr)
-      _ -> return $ respondHtml (Just $ fromMaybe (User u "" u) musr) $ newUser u
+      _ -> return $ respondHtml (Just $ fromMaybe (User u "") musr) $ newUser u
   REST.index $ maybeRegister $ do
     mu <- currentUser
     us <- liftLIO . withLBHPolicy $ findAll $ select [] "users"
@@ -166,7 +165,7 @@ usersController = do
     ldoc <- request >>= labeledRequestToHson
     mluser <- liftLIO $ updateUser ldoc
     case mluser of
-     Just luser -> do user <- unlabel luser
+     Just luser -> do user <- liftLIO $ unlabel luser
                       return $ redirectTo $ "/users/" ++ T.unpack (userId user)
      _ -> return $ forbidden
 
@@ -215,8 +214,7 @@ tagsController = do
       forM ps $ \p-> do
         u <- findBy  "users" "_id" (postOwner p)
         return (fromMaybe (User { userId = postOwner p
-                                , userFullName = T.empty
-                                , userEmail = T.empty }) u, p)
+                                , userFullName = T.empty }) u, p)
     return $ respondHtml mu $ indexPosts (S8.unpack tag ++ " posts") mu ups
 
 loginController :: Controller Response
@@ -225,7 +223,7 @@ loginController = do
     usr <- currentUser
     return $ respondHtml (maybe (def mu) Just usr) loginPage
         where def mu =  do u <- mu
-                           return $ User u "" u
+                           return $ User u ""
 
 welcomeController :: Controller Response
 welcomeController = maybeRegister $ do
@@ -244,8 +242,7 @@ atomPostsController = maybeRegister $  do
   ups <- liftLIO $ forM ps $ \p-> do
     u <- withLBHPolicy $ findBy  "users" "_id" (postOwner p)
     return (fromMaybe (User { userId = postOwner p
-                            , userFullName = T.empty
-                            , userEmail = T.empty }) u, p)
+                            , userFullName = T.empty }) u, p)
   return $ respondAtom $ atomIndexPosts "LearnByHacking - All posts" ups
 
 atomUserController :: Controller Response
@@ -281,7 +278,8 @@ currentUser = do
   case mu of
     Nothing -> return Nothing
     Just u -> liftLIO $ withLBHPolicy $ do
-      findBy "users" "email" u
+      findBy "users" "_id" u
+      --findBy "users" "email" u
 
 -- | Force user to register if they're logged in.
 maybeRegister :: Controller Response -> Controller Response

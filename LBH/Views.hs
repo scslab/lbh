@@ -81,7 +81,7 @@ respondHtml muser content = okHtml $ renderHtml $ docTypeHtml $ do
                   ! dataAttribute "toggle" "dropdown" $ do
                     img ! src (toValue $ T.concat [
                       "https://secure.gravatar.com/avatar/"
-                      , md5 (userEmail u), "?s=24"])
+                      , md5 (userId u), "?s=24"]) -- XXX
                     " "
                     toHtml $ userId u
                     b ! class_ "caret" $ ""
@@ -151,7 +151,7 @@ welcome musr = do
            else do a ! class_ "btn btn-primary" ! href "#"
                      ! onclick "$(\"#login\").click()" $ do
                      i ! class_ "icon-user icon-white" $ ""
-                     " Login with Persona"
+                     " Login"
      li ! class_ "span4" $ div ! class_ "thumbnail main-topic" $ do
        div ! class_ "caption" $ do
          span ! class_ "pictogram pull-right" $
@@ -246,11 +246,11 @@ editPost post = do
   --
   h1 $ "Edit post"
   div ! id "post-edit" $ do
-    form ! action "/posts" ! method "POST" ! id "editPost" $ do
+    form ! action (toValue $ "/posts" ++ (show . getPostId $ post)) ! method "POST" ! id "editPost" $ do
       div $ do
         input ! type_ "hidden" ! name "_method" ! value "PUT"
         input ! type_ "hidden" ! name "_id"
-              ! value (toValue $ show $ getPostId post)
+              ! value (toValue . show . getPostId $ post)
         input ! type_ "hidden" ! name "owner"
               ! value (toValue $ postOwner post)
         forM_ (postCollaborators post) $ \c ->
@@ -485,7 +485,7 @@ indexPosts idxTitle musr ups = do
                img ! class_ "pull-left media-object"
                    ! src (toValue $ T.concat
                               [ "https://secure.gravatar.com/avatar/"
-                              , md5 (userEmail user), "?s=48"])
+                              , md5 (userId user), "?s=48"]) -- XXX
                div ! class_ "media-body" $ do
                    h4 ! class_ "media-heading" $ do
                      a ! href (toValue postUrl) $ toHtml (postTitle post)
@@ -523,7 +523,7 @@ indexUsers musr ps = do
          ! onclick (toValue $ T.concat ["location.href=\'",userUrl,"\'"]) $ do
         img ! class_ "pull-left media-object"
             ! src (toValue $ T.concat ["https://secure.gravatar.com/avatar/"
-                                      , md5 (userEmail user), "?s=48"])
+                                      , md5 (userId user), "?s=48"]) --
         div ! class_ "media-body" $ do
             h4 ! class_ "media-heading" $ do
               a ! href (toValue userUrl) $ toHtml $ userId user
@@ -541,7 +541,7 @@ showUser user ownPS colPS isCurrentUser = do
       li ! class_ "media" $ do
         img ! class_ "pull-left media-object"
             ! src (toValue $ T.concat ["https://secure.gravatar.com/avatar/"
-                                      , md5 (userEmail user), "?s=48"])
+                                      , md5 (userId user), "?s=48"]) -- XXX
         div ! class_ "media-body" $ do
             h4 ! class_ "media-heading" $ toHtml $ userId user
             toHtml $ userFullName user
@@ -575,41 +575,41 @@ showUser user ownPS colPS isCurrentUser = do
                 span ! class_ "pull-right" $ toHtml $ showDate (postDate post)
 
 newUser :: UserName -> Html
-newUser uemail = do
+newUser uid = do
   script ! src "/static/js/application/users.js" $ ""
   h1 "Register"
   div $ do
     form ! action "/users" ! method "POST" ! id "newUser" $ do
       div $ do
-        label ! for "emailD" $ "Email address:"
+        label ! for "_id" $ "User ID:"
         input ! class_ "span4" ! type_ "text"
-              ! name "emailD" ! id "emailD"
+              ! name "_id" ! id "_id"
               ! disabled "disabled"
-              ! value (toValue uemail)
+              ! value (toValue uid)
         input ! type_ "hidden"
-              ! name "email" ! id "email"
-              ! value (toValue uemail)
+              ! name "_id" ! id "_id"
+              ! value (toValue uid)
       div $ do
         label ! for "fullName" $ "Full name:"
         input ! class_ "span4" ! type_ "text"
               ! name "fullName" ! id "fullName"
               ! placeholder "King Schultz"
-      div ! class_ "control-group" ! id "_id-group" $ do
-        label ! class_ "control-label" ! for "_id" $ do
-          "Username ("
-          a ! href "#"
-            ! dataAttribute "toggle" "tooltip"
-            ! A.title "Usernames can be at most 16 characters \
-                      \long. They must start with a letter and \
-                      \only contain letters, numbers, and \'_\',\
-                      \i.e., it must match ^[a-zA-Z][a-zA-Z0-9_]+$"
-            $ "?"
-          "):"
-        input ! class_ "span4" ! type_ "text"
-              ! name "_id" ! id "_id"
-              ! placeholder "dr_schultz"
-        span ! id "_id-group-help"
-             ! class_ "help-inline" $ ""
+--       div ! class_ "control-group" ! id "_id-group" $ do
+--         label ! class_ "control-label" ! for "_id" $ do
+--           "Username ("
+--           a ! href "#"
+--             ! dataAttribute "toggle" "tooltip"
+--             ! A.title "Usernames can be at most 16 characters \
+--                       \long. They must start with a letter and \
+--                       \only contain letters, numbers, and \'_\',\
+--                       \i.e., it must match ^[a-zA-Z][a-zA-Z0-9_]+$"
+--             $ "?"
+--           "):"
+--         input ! class_ "span4" ! type_ "text"
+--               ! name "_id" ! id "_id"
+--               ! placeholder "dr_schultz"
+--         span ! id "_id-group-help"
+--              ! class_ "help-inline" $ ""
       div ! class_ "btn-group" $ do
         input ! type_ "button" ! id "newUser-submit-btn"
               ! class_ "btn btn-primary" ! value "Sign Up"
@@ -622,17 +622,17 @@ editUser user = do
   script ! src "/static/js/application/users.js" $ ""
   h1 $ toHtml (userId user)
   div $ do
-    form ! action "/users" ! method "POST" ! id "editUser" $ do
+    form ! action (toValue $ "/users/" ++ (T.unpack . userId $ user)) ! method "POST" ! id "editUser" $ do
       input ! type_ "hidden" ! name "_method" ! value "PUT"
-      div $ do
-        label ! for "emailD" $ "Email address:"
-        input ! class_ "span4" ! type_ "text"
-              ! name "emailD"
-              ! disabled "disabled"
-              ! value (toValue $ userEmail user)
-        input ! type_ "hidden"
-              ! name "email" ! id "email"
-              ! value (toValue $ userEmail user)
+--       div $ do
+--         label ! for "emailD" $ "Email address:"
+--         input ! class_ "span4" ! type_ "text"
+--               ! name "emailD"
+--               ! disabled "disabled"
+--               ! value (toValue $ userEmail user)
+--         input ! type_ "hidden"
+--               ! name "email" ! id "email"
+--               ! value (toValue $ userEmail user)
       div $ do
         label ! for "fullName" $ "Full name:"
         input ! class_ "span4" ! type_ "text"
