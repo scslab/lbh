@@ -39,10 +39,10 @@ import           LBH.ActiveCode ( extractActieCodeBlocks
                                 , activeCodeToInactiveBlocks ) 
 
 lbhAuthority :: String
-lbhAuthority = "learnbyhacking.org"
+lbhAuthority = "localhost:8080"
 
 lbhUrl :: String
-lbhUrl = "https://www." ++ lbhAuthority
+lbhUrl = "http://" ++ lbhAuthority
 
 respondHtml :: Maybe User -> Html -> Response
 respondHtml muser content = okHtml $ renderHtml $ docTypeHtml $ do
@@ -79,9 +79,7 @@ respondHtml muser content = okHtml $ renderHtml $ docTypeHtml $ do
               li ! class_ "dropdown" $ do
                 a ! href "#" ! class_ "dropdown-toggle" 
                   ! dataAttribute "toggle" "dropdown" $ do
-                    img ! src (toValue $ T.concat [
-                      "https://secure.gravatar.com/avatar/"
-                      , md5 (userId u), "?s=24"]) -- XXX
+                    img ! src (toValue $ T.concat ["/static/avatar", (userId u), ".png"]) -- XXX
                     " "
                     toHtml $ userId u
                     b ! class_ "caret" $ ""
@@ -175,8 +173,6 @@ welcome musr = do
            else return ()
    div ! class_ "row-fluid text-center" $ small $ do
        "fork me on: "
-       a ! href "http://www.gitstar.com/deian/lbh" $ "gitstar"
-       " "
        a ! href "https://www.github.com/scslab/lbh" $ "github"
 
       where uid = userId $ fromJust musr
@@ -483,9 +479,7 @@ indexPosts idxTitle musr ups = do
              li ! class_ "media"
                 ! onclick (toValue $ "location.href=\'" ++ postUrl ++ "\'") $ do
                img ! class_ "pull-left media-object"
-                   ! src (toValue $ T.concat
-                              [ "https://secure.gravatar.com/avatar/"
-                              , md5 (userId user), "?s=48"]) -- XXX
+                   ! src (toValue $ T.concat [ "/static/avatar/", (userId user), ".png"]) -- XXX
                div ! class_ "media-body" $ do
                    h4 ! class_ "media-heading" $ do
                      a ! href (toValue postUrl) $ toHtml (postTitle post)
@@ -522,8 +516,7 @@ indexUsers musr ps = do
       li ! class_ "media"
          ! onclick (toValue $ T.concat ["location.href=\'",userUrl,"\'"]) $ do
         img ! class_ "pull-left media-object"
-            ! src (toValue $ T.concat ["https://secure.gravatar.com/avatar/"
-                                      , md5 (userId user), "?s=48"]) --
+            ! src (toValue $ T.concat ["/static/avatar/", (userId user), ".png"]) --
         div ! class_ "media-body" $ do
             h4 ! class_ "media-heading" $ do
               a ! href (toValue userUrl) $ toHtml $ userId user
@@ -540,8 +533,7 @@ showUser user ownPS colPS isCurrentUser = do
     ul ! class_ "media-list " $ do
       li ! class_ "media" $ do
         img ! class_ "pull-left media-object"
-            ! src (toValue $ T.concat ["https://secure.gravatar.com/avatar/"
-                                      , md5 (userId user), "?s=48"]) -- XXX
+            ! src (toValue $ T.concat ["/static/avatar/", (userId user), ".png"]) -- XXX
         div ! class_ "media-body" $ do
             h4 ! class_ "media-heading" $ toHtml $ userId user
             toHtml $ userFullName user
